@@ -1,0 +1,285 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>HappyTrack</title>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <style>
+    @keyframes fadeIn {
+      from { opacity: 0; transform: translateY(-10px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+
+    body {
+      font-family: 'Segoe UI', sans-serif;
+      margin: 0;
+      padding: 10px;
+      background: linear-gradient(135deg, #f0f8ff, #e0f7fa);
+    }
+
+    h1 {
+      text-align: center;
+      font-size: 2.5rem;
+      color: #ff1493;
+      margin-bottom: 30px;
+      animation: fadeIn 1s ease-in-out;
+      text-shadow: 2px 2px #ffe0f0;
+    }
+
+    .container {
+      max-width: 1000px;
+      margin: 0 auto;
+      padding: 10px;
+    }
+
+    .manual-setup {
+      margin: 20px auto;
+      background: #fff;
+      padding: 20px;
+      border-radius: 16px;
+      box-shadow: 0 4px 10px rgba(0,0,0,0.1);
+    }
+    .manual-setup input {
+      width: 60px;
+      margin: 5px;
+      padding: 5px;
+    }
+
+    .subject {
+      margin: 15px 0;
+      background: #fff;
+      padding: 20px;
+      border-radius: 16px;
+      box-shadow: 0 4px 10px rgba(0,0,0,0.1);
+      transition: transform 0.3s ease;
+    }
+    .subject:hover {
+      transform: translateY(-3px);
+    }
+    .subject h3 {
+      margin-bottom: 10px;
+      color: #007bff;
+    }
+    .attendance {
+      display: flex;
+      flex-wrap: wrap;
+      justify-content: space-between;
+      align-items: center;
+    }
+    .attendance button {
+      padding: 8px 12px;
+      margin: 5px;
+      border: none;
+      border-radius: 8px;
+      background-color: #28a745;
+      color: white;
+      cursor: pointer;
+      transition: background 0.2s;
+    }
+    .attendance button.absent {
+      background-color: #dc3545;
+    }
+    .attendance button:hover {
+      opacity: 0.9;
+    }
+    .status {
+      flex-grow: 1;
+      text-align: right;
+      padding-left: 10px;
+    }
+    canvas {
+      max-width: 100%;
+      margin: 30px auto;
+      display: block;
+    }
+    .planner {
+      margin: 40px auto;
+      background: #fff;
+      padding: 20px;
+      border-radius: 16px;
+      box-shadow: 0 4px 10px rgba(0,0,0,0.1);
+    }
+    #targetInput {
+      width: 60px;
+      padding: 5px;
+    }
+
+    @media (max-width: 600px) {
+      .attendance {
+        flex-direction: column;
+        align-items: flex-start;
+      }
+      .status {
+        text-align: left;
+        padding-left: 0;
+        margin-top: 10px;
+      }
+    }
+  </style>
+</head>
+<body>
+  <h1>🎉 Welcome to HappyTrack</h1>
+
+  <div class="container">
+    <!-- 🔍 Search Input -->
+    <input type="text" id="searchInput" placeholder="🔍 Search subject..." style="width:100%;padding:10px;margin-bottom:20px;border-radius:10px;border:1px solid #ccc;" oninput="filterSubjects()">
+
+    <div id="subjects"></div>
+
+    <canvas id="attendanceChart"></canvas>
+
+    <div class="planner">
+      <h3>🎯 Target Planner</h3>
+      <label for="targetInput">Set Target %:</label>
+      <input type="number" id="targetInput" value="75">%
+      <p id="plannerResult"></p>
+    </div>
+
+    <div class="manual-setup">
+      <h3>🔧 Manual Setup (Only Once)</h3>
+      <div id="setupContainer"></div>
+      <button onclick="saveManualSetup()">Save Initial Data</button>
+    </div>
+  </div>
+
+  <script>
+    const subjects = ["Kannada", "English", "DS", "Java", "OS", "CV", "OS Lab", "Java Lab", "DS Lab"];
+    let data = {};
+
+    const savedData = localStorage.getItem("attendanceData");
+    if (savedData) {
+      data = JSON.parse(savedData);
+    } else {
+      subjects.forEach(subject => {
+        data[subject] = { present: 0, total: 0, log: {} };
+      });
+    }
+
+    const setupContainer = document.getElementById("setupContainer");
+    subjects.forEach(subject => {
+      if (!data[subject].log) data[subject].log = {};
+      setupContainer.innerHTML += `
+        <div>
+          <strong>${subject}</strong> - Present: 
+          <input type="number" id="init-present-${subject}" value="${data[subject].present}">
+          Total: 
+          <input type="number" id="init-total-${subject}" value="${data[subject].total}">
+        </div>
+      `;
+    });
+
+    function saveManualSetup() {
+      subjects.forEach(subject => {
+        const pres = parseInt(document.getElementById(`init-present-${subject}`).value);
+        const tot = parseInt(document.getElementById(`init-total-${subject}`).value);
+        data[subject].present = pres;
+        data[subject].total = tot;
+      });
+      localStorage.setItem("attendanceData", JSON.stringify(data));
+      alert("✅ Initial attendance saved!");
+      location.reload();
+    }
+
+    const subjectContainer = document.getElementById("subjects");
+    subjects.forEach(subject => {
+      const div = document.createElement("div");
+      div.className = "subject";
+      div.innerHTML = `
+        <h3>${subject}</h3>
+        <div class="attendance">
+          <button onclick="mark('${subject}', true)">✅ Present</button>
+          <button class="absent" onclick="mark('${subject}', false)">❌ Absent</button>
+          <div class="status" id="status-${subject}"></div>
+        </div>
+      `;
+      subjectContainer.appendChild(div);
+      updateUI(subject);
+    });
+
+    function mark(subject, present) {
+      const today = new Date().toISOString().split("T")[0];
+      if (!data[subject].log) data[subject].log = {};
+      if (data[subject].log[today]) {
+        alert("⚠️ Already marked attendance for this subject today.");
+        return;
+      }
+      data[subject].log[today] = present;
+
+      data[subject].total++;
+      if (present) data[subject].present++;
+      localStorage.setItem("attendanceData", JSON.stringify(data));
+      updateUI(subject);
+      updateChart();
+      updatePlanner();
+    }
+
+    function updateUI(subject) {
+      const d = data[subject];
+      const percent = d.total > 0 ? ((d.present / d.total) * 100).toFixed(1) : 0;
+      document.getElementById(`status-${subject}`).innerText = `Present: ${d.present} | Total: ${d.total} (${percent}%)`;
+    }
+
+    const ctx = document.getElementById('attendanceChart').getContext('2d');
+    const chart = new Chart(ctx, {
+      type: 'bar',
+      data: {
+        labels: subjects,
+        datasets: [{
+          label: 'Attendance %',
+          data: subjects.map(s => 0),
+          backgroundColor: '#ff4081'
+        }]
+      },
+      options: {
+        scales: {
+          y: {
+            beginAtZero: true,
+            max: 100
+          }
+        }
+      }
+    });
+
+    function updateChart() {
+      chart.data.datasets[0].data = subjects.map(sub => {
+        const d = data[sub];
+        return d.total > 0 ? ((d.present / d.total) * 100).toFixed(1) : 0;
+      });
+      chart.update();
+    }
+
+    function updatePlanner() {
+      const target = parseFloat(document.getElementById("targetInput").value);
+      let text = "";
+      subjects.forEach(sub => {
+        const d = data[sub];
+        if (d.total > 0) {
+          const p = d.present;
+          const t = d.total;
+          const x = Math.ceil((target * t - 100 * p) / (100 - target));
+          text += `<strong>${sub}</strong>: Attend next <b>${x > 0 ? x : 0}</b> class(es) to reach ${target}%<br>`;
+        }
+      });
+      document.getElementById("plannerResult").innerHTML = text;
+    }
+
+    function filterSubjects() {
+      const query = document.getElementById("searchInput").value.toLowerCase();
+      document.querySelectorAll(".subject").forEach(subDiv => {
+        const title = subDiv.querySelector("h3").innerText.toLowerCase();
+        subDiv.style.display = title.includes(query) ? "block" : "none";
+      });
+    }
+
+    window.addEventListener("load", () => {
+      const hourNow = new Date().getHours();
+      if (hourNow >= 9 && hourNow <= 11) {
+        alert("⏰ Don't forget to mark your attendance for today!");
+      }
+      updateChart();
+      updatePlanner();
+    });
+  </script>
+</body>
+</html>
